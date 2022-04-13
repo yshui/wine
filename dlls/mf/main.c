@@ -34,6 +34,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
 extern const GUID CLSID_FileSchemePlugin;
+extern const GUID CLSID_GStreamerSchemePlugin;
+
+HRESULT WINAPI winegstreamer_create_media_source_from_uri(const WCHAR *, IUnknown **);
 
 struct activate_object
 {
@@ -547,7 +550,7 @@ static const IClassFactoryVtbl class_factory_vtbl =
     class_factory_LockServer,
 };
 
-struct file_scheme_handler_result
+struct scheme_handler_result
 {
     struct list entry;
     IMFAsyncResult *result;
@@ -555,7 +558,7 @@ struct file_scheme_handler_result
     IUnknown *object;
 };
 
-struct file_scheme_handler
+struct scheme_handler
 {
     IMFSchemeHandler IMFSchemeHandler_iface;
     IMFAsyncCallback IMFAsyncCallback_iface;
@@ -565,17 +568,17 @@ struct file_scheme_handler
     CRITICAL_SECTION cs;
 };
 
-static struct file_scheme_handler *impl_from_IMFSchemeHandler(IMFSchemeHandler *iface)
+static struct scheme_handler *impl_from_IMFSchemeHandler(IMFSchemeHandler *iface)
 {
-    return CONTAINING_RECORD(iface, struct file_scheme_handler, IMFSchemeHandler_iface);
+    return CONTAINING_RECORD(iface, struct scheme_handler, IMFSchemeHandler_iface);
 }
 
-static struct file_scheme_handler *impl_from_IMFAsyncCallback(IMFAsyncCallback *iface)
+static struct scheme_handler *impl_from_IMFAsyncCallback(IMFAsyncCallback *iface)
 {
-    return CONTAINING_RECORD(iface, struct file_scheme_handler, IMFAsyncCallback_iface);
+    return CONTAINING_RECORD(iface, struct scheme_handler, IMFAsyncCallback_iface);
 }
 
-static HRESULT WINAPI file_scheme_handler_QueryInterface(IMFSchemeHandler *iface, REFIID riid, void **obj)
+static HRESULT WINAPI scheme_handler_QueryIntace(IMFSchemeHandler *iface, REFIID riid, void **obj)
 {
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
 
@@ -592,9 +595,9 @@ static HRESULT WINAPI file_scheme_handler_QueryInterface(IMFSchemeHandler *iface
     return E_NOINTERFACE;
 }
 
-static ULONG WINAPI file_scheme_handler_AddRef(IMFSchemeHandler *iface)
+static ULONG WINAPI scheme_handler_AddRef(IMFSchemeHandler *iface)
 {
-    struct file_scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
     ULONG refcount = InterlockedIncrement(&handler->refcount);
 
     TRACE("%p, refcount %u.\n", handler, refcount);
@@ -602,17 +605,17 @@ static ULONG WINAPI file_scheme_handler_AddRef(IMFSchemeHandler *iface)
     return refcount;
 }
 
-static ULONG WINAPI file_scheme_handler_Release(IMFSchemeHandler *iface)
+static ULONG WINAPI scheme_handler_Release(IMFSchemeHandler *iface)
 {
-    struct file_scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
     ULONG refcount = InterlockedDecrement(&handler->refcount);
-    struct file_scheme_handler_result *result, *next;
+    struct scheme_handler_result *result, *next;
 
     TRACE("%p, refcount %u.\n", iface, refcount);
 
     if (!refcount)
     {
-        LIST_FOR_EACH_ENTRY_SAFE(result, next, &handler->results, struct file_scheme_handler_result, entry)
+        LIST_FOR_EACH_ENTRY_SAFE(result, next, &handler->results, struct scheme_handler_result, entry)
         {
             list_remove(&result->entry);
             IMFAsyncResult_Release(result->result);
@@ -695,10 +698,10 @@ static const IUnknownVtbl create_object_context_vtbl =
     create_object_context_Release,
 };
 
-static HRESULT WINAPI file_scheme_handler_BeginCreateObject(IMFSchemeHandler *iface, const WCHAR *url, DWORD flags,
+static HRESULT WINAPI scheme_handler_BeginCreateObject(IMFSchemeHandler *iface, const WCHAR *url, DWORD flags,
         IPropertyStore *props, IUnknown **cancel_cookie, IMFAsyncCallback *callback, IUnknown *state)
 {
-    struct file_scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
     struct create_object_context *context;
     IMFAsyncResult *caller, *item;
     HRESULT hr;
@@ -751,18 +754,18 @@ static HRESULT WINAPI file_scheme_handler_BeginCreateObject(IMFSchemeHandler *if
     return hr;
 }
 
-static HRESULT WINAPI file_scheme_handler_EndCreateObject(IMFSchemeHandler *iface, IMFAsyncResult *result,
+static HRESULT WINAPI scheme_handler_EndCreateObject(IMFSchemeHandler *iface, IMFAsyncResult *result,
         MF_OBJECT_TYPE *obj_type, IUnknown **object)
 {
-    struct file_scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
-    struct file_scheme_handler_result *found = NULL, *cur;
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    struct scheme_handler_result *found = NULL, *cur;
     HRESULT hr;
 
     TRACE("%p, %p, %p, %p.\n", iface, result, obj_type, object);
 
     EnterCriticalSection(&handler->cs);
 
-    LIST_FOR_EACH_ENTRY(cur, &handler->results, struct file_scheme_handler_result, entry)
+    LIST_FOR_EACH_ENTRY(cur, &handler->results, struct scheme_handler_result, entry)
     {
         if (result == cur->result)
         {
@@ -792,16 +795,16 @@ static HRESULT WINAPI file_scheme_handler_EndCreateObject(IMFSchemeHandler *ifac
     return hr;
 }
 
-static HRESULT WINAPI file_scheme_handler_CancelObjectCreation(IMFSchemeHandler *iface, IUnknown *cancel_cookie)
+static HRESULT WINAPI scheme_handler_CancelObjectCreation(IMFSchemeHandler *iface, IUnknown *cancel_cookie)
 {
-    struct file_scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
-    struct file_scheme_handler_result *found = NULL, *cur;
+    struct scheme_handler *handler = impl_from_IMFSchemeHandler(iface);
+    struct scheme_handler_result *found = NULL, *cur;
 
     TRACE("%p, %p.\n", iface, cancel_cookie);
 
     EnterCriticalSection(&handler->cs);
 
-    LIST_FOR_EACH_ENTRY(cur, &handler->results, struct file_scheme_handler_result, entry)
+    LIST_FOR_EACH_ENTRY(cur, &handler->results, struct scheme_handler_result, entry)
     {
         if (cancel_cookie == (IUnknown *)cur->result)
         {
@@ -824,17 +827,17 @@ static HRESULT WINAPI file_scheme_handler_CancelObjectCreation(IMFSchemeHandler 
     return found ? S_OK : MF_E_UNEXPECTED;
 }
 
-static const IMFSchemeHandlerVtbl file_scheme_handler_vtbl =
+static const IMFSchemeHandlerVtbl scheme_handler_vtbl =
 {
-    file_scheme_handler_QueryInterface,
-    file_scheme_handler_AddRef,
-    file_scheme_handler_Release,
-    file_scheme_handler_BeginCreateObject,
-    file_scheme_handler_EndCreateObject,
-    file_scheme_handler_CancelObjectCreation,
+    scheme_handler_QueryIntace,
+    scheme_handler_AddRef,
+    scheme_handler_Release,
+    scheme_handler_BeginCreateObject,
+    scheme_handler_EndCreateObject,
+    scheme_handler_CancelObjectCreation,
 };
 
-static HRESULT WINAPI file_scheme_handler_callback_QueryInterface(IMFAsyncCallback *iface, REFIID riid, void **obj)
+static HRESULT WINAPI scheme_handler_callback_QueryIntace(IMFAsyncCallback *iface, REFIID riid, void **obj)
 {
     if (IsEqualIID(riid, &IID_IMFAsyncCallback) ||
             IsEqualIID(riid, &IID_IUnknown))
@@ -849,24 +852,24 @@ static HRESULT WINAPI file_scheme_handler_callback_QueryInterface(IMFAsyncCallba
     return E_NOINTERFACE;
 }
 
-static ULONG WINAPI file_scheme_handler_callback_AddRef(IMFAsyncCallback *iface)
+static ULONG WINAPI scheme_handler_callback_AddRef(IMFAsyncCallback *iface)
 {
-    struct file_scheme_handler *handler = impl_from_IMFAsyncCallback(iface);
+    struct scheme_handler *handler = impl_from_IMFAsyncCallback(iface);
     return IMFSchemeHandler_AddRef(&handler->IMFSchemeHandler_iface);
 }
 
-static ULONG WINAPI file_scheme_handler_callback_Release(IMFAsyncCallback *iface)
+static ULONG WINAPI scheme_handler_callback_Release(IMFAsyncCallback *iface)
 {
-    struct file_scheme_handler *handler = impl_from_IMFAsyncCallback(iface);
+    struct scheme_handler *handler = impl_from_IMFAsyncCallback(iface);
     return IMFSchemeHandler_Release(&handler->IMFSchemeHandler_iface);
 }
 
-static HRESULT WINAPI file_scheme_handler_callback_GetParameters(IMFAsyncCallback *iface, DWORD *flags, DWORD *queue)
+static HRESULT WINAPI scheme_handler_callback_GetParameters(IMFAsyncCallback *iface, DWORD *flags, DWORD *queue)
 {
     return E_NOTIMPL;
 }
 
-static HRESULT file_scheme_handler_get_resolver(struct file_scheme_handler *handler, IMFSourceResolver **resolver)
+static HRESULT file_scheme_handler_get_resolver(struct scheme_handler *handler, IMFSourceResolver **resolver)
 {
     HRESULT hr;
 
@@ -890,8 +893,8 @@ static HRESULT file_scheme_handler_get_resolver(struct file_scheme_handler *hand
 static HRESULT WINAPI file_scheme_handler_callback_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
 {
     static const WCHAR schemeW[] = {'f','i','l','e',':','/','/'};
-    struct file_scheme_handler *handler = impl_from_IMFAsyncCallback(iface);
-    struct file_scheme_handler_result *handler_result;
+    struct scheme_handler *handler = impl_from_IMFAsyncCallback(iface);
+    struct scheme_handler_result *handler_result;
     MF_OBJECT_TYPE obj_type = MF_OBJECT_INVALID;
     IUnknown *object = NULL, *context_object;
     struct create_object_context *context;
@@ -964,18 +967,75 @@ static HRESULT WINAPI file_scheme_handler_callback_Invoke(IMFAsyncCallback *ifac
     return S_OK;
 }
 
+static HRESULT WINAPI gstreamer_scheme_handler_callback_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
+{
+    IMFAsyncResult *caller;
+    struct scheme_handler *handler = impl_from_IMFAsyncCallback(iface);
+    struct scheme_handler_result *handler_result;
+    IUnknown *object = NULL, *context_object;
+    struct create_object_context *context;
+    HRESULT hr;
+
+    caller = (IMFAsyncResult *)IMFAsyncResult_GetStateNoAddRef(result);
+
+    if (FAILED(hr = IMFAsyncResult_GetObject(result, &context_object)))
+    {
+        WARN("Expected context set for callee result.\n");
+        return hr;
+    }
+
+    context = impl_from_IUnknown(context_object);
+
+    hr = winegstreamer_create_media_source_from_uri(context->url, &object);
+
+    handler_result = malloc(sizeof(*handler_result));
+    if (handler_result)
+    {
+        handler_result->result = caller;
+        IMFAsyncResult_AddRef(handler_result->result);
+
+        // We only know how to create media source
+        handler_result->obj_type = MF_OBJECT_MEDIASOURCE;
+        handler_result->object = object;
+
+        EnterCriticalSection(&handler->cs);
+        list_add_tail(&handler->results, &handler_result->entry);
+        LeaveCriticalSection(&handler->cs);
+    }
+    else
+    {
+        if (object)
+            IUnknown_Release(object);
+        hr = E_OUTOFMEMORY;
+    }
+
+    IMFAsyncResult_SetStatus(caller, hr);
+    MFInvokeCallback(caller);
+
+    return S_OK;
+}
+
 static const IMFAsyncCallbackVtbl file_scheme_handler_callback_vtbl =
 {
-    file_scheme_handler_callback_QueryInterface,
-    file_scheme_handler_callback_AddRef,
-    file_scheme_handler_callback_Release,
-    file_scheme_handler_callback_GetParameters,
+    scheme_handler_callback_QueryIntace,
+    scheme_handler_callback_AddRef,
+    scheme_handler_callback_Release,
+    scheme_handler_callback_GetParameters,
     file_scheme_handler_callback_Invoke,
+};
+
+static const IMFAsyncCallbackVtbl gstreamer_scheme_handler_callback_vtbl =
+{
+    scheme_handler_callback_QueryIntace,
+    scheme_handler_callback_AddRef,
+    scheme_handler_callback_Release,
+    scheme_handler_callback_GetParameters,
+    gstreamer_scheme_handler_callback_Invoke,
 };
 
 static HRESULT file_scheme_handler_construct(REFIID riid, void **obj)
 {
-    struct file_scheme_handler *handler;
+    struct scheme_handler *handler;
     HRESULT hr;
 
     TRACE("%s, %p.\n", debugstr_guid(riid), obj);
@@ -983,7 +1043,7 @@ static HRESULT file_scheme_handler_construct(REFIID riid, void **obj)
     if (!(handler = calloc(1, sizeof(*handler))))
         return E_OUTOFMEMORY;
 
-    handler->IMFSchemeHandler_iface.lpVtbl = &file_scheme_handler_vtbl;
+    handler->IMFSchemeHandler_iface.lpVtbl = &scheme_handler_vtbl;
     handler->IMFAsyncCallback_iface.lpVtbl = &file_scheme_handler_callback_vtbl;
     handler->refcount = 1;
     list_init(&handler->results);
@@ -997,6 +1057,30 @@ static HRESULT file_scheme_handler_construct(REFIID riid, void **obj)
 
 static struct class_factory file_scheme_handler_factory = { { &class_factory_vtbl }, file_scheme_handler_construct };
 
+static HRESULT gstreamer_scheme_handler_construct(REFIID riid, void **obj)
+{
+    struct scheme_handler *handler;
+    HRESULT hr;
+
+    TRACE("%s, %p.\n", debugstr_guid(riid), obj);
+
+    if (!(handler = calloc(1, sizeof(*handler))))
+        return E_OUTOFMEMORY;
+
+    handler->IMFSchemeHandler_iface.lpVtbl = &scheme_handler_vtbl;
+    handler->IMFAsyncCallback_iface.lpVtbl = &gstreamer_scheme_handler_callback_vtbl;
+    handler->refcount = 1;
+    list_init(&handler->results);
+    InitializeCriticalSection(&handler->cs);
+
+    hr = IMFSchemeHandler_QueryInterface(&handler->IMFSchemeHandler_iface, riid, obj);
+    IMFSchemeHandler_Release(&handler->IMFSchemeHandler_iface);
+
+    return hr;
+}
+
+static struct class_factory gstreamer_scheme_handler_factory = { { &class_factory_vtbl }, gstreamer_scheme_handler_construct };
+
 static const struct class_object
 {
     const GUID *clsid;
@@ -1005,6 +1089,7 @@ static const struct class_object
 class_objects[] =
 {
     { &CLSID_FileSchemePlugin, &file_scheme_handler_factory.IClassFactory_iface },
+    { &CLSID_GStreamerSchemePlugin, &gstreamer_scheme_handler_factory.IClassFactory_iface },
 };
 
 /*******************************************************************************

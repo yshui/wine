@@ -24,3 +24,10 @@
     uuid(477ec299-1421-4bdd-971f-7ccb933f21ad)
 ]
 coclass FileSchemePlugin { }
+
+[
+    helpstring("GStreamer scheme handler"),
+    threading(both),
+    uuid(587eeb6a-7336-4ebd-a4f2-91c948de622c)
+]
+coclass GStreamerSchemePlugin { }
