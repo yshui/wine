@@ -4,3 +4,4 @@
 @ stdcall -private DllUnregisterServer()
 @ stdcall winegstreamer_create_wm_async_reader(ptr)
 @ stdcall winegstreamer_create_wm_sync_reader(ptr)
+@ stdcall winegstreamer_create_media_source_from_uri(ptr ptr)
